@@ -1,4 +1,4 @@
-"""Provider-neutral Market Data Interface.
+"""Provider-neutral Market Data Interface hierarchy.
 
 Defines the contract for streaming live market events and retrieving historical
 candles across any exchange or data provider (crypto, equities, futures).
@@ -9,11 +9,11 @@ from collections.abc import AsyncIterator
 from datetime import datetime
 from typing import Any
 
-from data.ingestion.models import Candle, MarketEvent
+from data.ingestion.models import Candle, MarketEvent, NormalizedTrade
 
 
-class MarketDataInterface(ABC):
-    """Abstract interface for all market data connectors."""
+class WebSocketMarketDataProvider(ABC):
+    """Abstract interface for streaming live real-time market data over WebSockets."""
 
     @property
     @abstractmethod
@@ -53,6 +53,21 @@ class MarketDataInterface(ABC):
         yield  # type: ignore[misc]
 
     @abstractmethod
+    def get_health(self) -> dict[str, Any]:
+        """Return operational connection diagnostics and telemetry."""
+        pass
+
+
+class HistoricalMarketDataProvider(ABC):
+    """Abstract interface for fetching historical market data via REST/HTTP or files."""
+
+    @property
+    @abstractmethod
+    def provider_name(self) -> str:
+        """Name of the historical data provider."""
+        pass
+
+    @abstractmethod
     async def fetch_historical_candles(
         self,
         symbol: str,
@@ -64,7 +79,18 @@ class MarketDataInterface(ABC):
         """Fetch historical candlesticks via HTTP/REST for backfilling and reconciliation."""
         pass
 
-    @abstractmethod
-    def get_health(self) -> dict[str, Any]:
-        """Return operational connection diagnostics and telemetry."""
-        pass
+    async def fetch_historical_trades(
+        self,
+        symbol: str,
+        start: datetime | None = None,
+        end: datetime | None = None,
+        limit: int = 1000,
+    ) -> list[NormalizedTrade]:
+        """Fetch historical trade ticks where supported by provider."""
+        return []
+
+
+class MarketDataInterface(WebSocketMarketDataProvider, HistoricalMarketDataProvider, ABC):
+    """Unified provider interface supporting both live streaming and historical downloads."""
+
+    pass

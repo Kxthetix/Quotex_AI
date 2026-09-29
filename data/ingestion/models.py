@@ -1,6 +1,7 @@
 """Core domain models for market data events, candles, and metrics."""
 
 from datetime import UTC, datetime
+from enum import StrEnum
 from typing import Any
 from uuid import uuid4
 
@@ -97,3 +98,84 @@ class LatencyMetrics(BaseModel):
     sample_count: int
     min_ms: float
     max_ms: float
+
+
+class IngestionRunStatus(StrEnum):
+    STARTED = "STARTED"
+    IN_PROGRESS = "IN_PROGRESS"
+    COMPLETED = "COMPLETED"
+    FAILED = "FAILED"
+    PARTIAL = "PARTIAL"
+
+
+class IngestionRun(BaseModel):
+    """Execution run ledger for tracking historical and bulk ingestion jobs."""
+
+    run_id: str = Field(default_factory=lambda: str(uuid4()))
+    provider: str
+    symbol: str
+    timeframe: str = "1m"
+    requested_start: datetime | None = None
+    requested_end: datetime | None = None
+    actual_start: datetime | None = None
+    actual_end: datetime | None = None
+    status: IngestionRunStatus = IngestionRunStatus.STARTED
+    records_received: int = 0
+    records_accepted: int = 0
+    records_rejected: int = 0
+    duplicates: int = 0
+    errors: list[str] = Field(default_factory=list)
+    created_at: datetime = Field(default_factory=lambda: datetime.now(UTC))
+    completion_time: datetime | None = None
+
+    @field_validator("symbol")
+    @classmethod
+    def normalize_symbol(cls, v: str) -> str:
+        return v.strip().upper()
+
+
+class CandleCorrectionRecord(BaseModel):
+    """Audit record generated when a late/out-of-order trade adjusts an already-closed candle."""
+
+    correction_id: str = Field(default_factory=lambda: str(uuid4()))
+    symbol: str
+    timeframe: str
+    start_time: datetime
+    original_open: float
+    original_high: float
+    original_low: float
+    original_close: float
+    original_volume: float
+    original_trades: int
+    revised_high: float
+    revised_low: float
+    revised_close: float
+    revised_volume: float
+    revised_trades: int
+    late_trade_id: str
+    late_trade_price: float
+    late_trade_quantity: float
+    late_trade_timestamp: datetime
+    detected_at: datetime = Field(default_factory=lambda: datetime.now(UTC))
+
+
+class CandleGapReason(StrEnum):
+    NETWORK_OUTAGE = "NETWORK_OUTAGE"
+    PROVIDER_DATA_DROPOUT = "PROVIDER_DATA_DROPOUT"
+    MARKET_SESSION_CLOSED = "MARKET_SESSION_CLOSED"
+    NO_TRADE_PERIOD = "NO_TRADE_PERIOD"
+    UNKNOWN = "UNKNOWN"
+
+
+class CandleGapRecord(BaseModel):
+    """Structured record of a detected sequence gap between consecutive candles."""
+
+    gap_id: str = Field(default_factory=lambda: str(uuid4()))
+    symbol: str
+    timeframe: str
+    gap_start: datetime
+    gap_end: datetime
+    missing_candles_count: int
+    reason: CandleGapReason = CandleGapReason.UNKNOWN
+    detected_at: datetime = Field(default_factory=lambda: datetime.now(UTC))
+    is_failure: bool = True

@@ -153,6 +153,9 @@ class BinanceWebSocketConnector(MarketDataInterface):
                     receive_time=datetime.now(UTC),
                     payload=payload,
                 )
+            except json.JSONDecodeError as e:
+                logger.warning("binance_malformed_json_frame_ignored", error=str(e))
+                continue
             except websockets.exceptions.ConnectionClosed as e:
                 self._is_connected = False
                 logger.warning("binance_connection_closed", code=e.code, reason=e.reason)

@@ -21,13 +21,15 @@ async def test_live_stream():
     async for event in connector.stream_events():
         # Validate raw
         raw_val = quality_engine.validate_raw_event(event)
+        if not raw_val.is_valid:
+            continue
         # Normalize
         trade = normalizer.normalize_trade(event)
         # Validate trade
         trade_val = quality_engine.validate_trade(trade)
 
         print(
-            f"  [TICK {count+1}] Symbol: {trade.symbol} | Price: ${trade.price:,.2f} | "
+            f"  [TICK {count + 1}] Symbol: {trade.symbol} | Price: ${trade.price:,.2f} | "
             f"Qty: {trade.quantity} | Side: {trade.side} | Valid: {trade_val.is_valid}"
         )
 
@@ -36,7 +38,9 @@ async def test_live_stream():
             break
 
     await connector.disconnect()
-    print("Live stream verification successful! Pipeline received, validated, and normalized real ticks.")
+    print(
+        "Live stream verification successful! Pipeline received, validated, and normalized real ticks."
+    )
 
 
 if __name__ == "__main__":

@@ -15,11 +15,12 @@ from data.ingestion.binance_connector import BinanceWebSocketConnector
 from data.ingestion.candle_builder import CandleBuilder
 from data.ingestion.connection_manager import ConnectionManager
 from data.ingestion.market_data_interface import MarketDataInterface
-from data.ingestion.models import Candle, MarketEvent, NormalizedTrade
+from data.ingestion.models import Candle, CandleCorrectionRecord, MarketEvent, NormalizedTrade
 from data.normalization.normalizer import EventNormalizer
 from data.storage.postgres import AsyncPersistenceWorker, DatabaseManager
 from data.storage.redis_store import MarketStateStore
 from data.validation.engine import DataQualityEngine
+from data.validation.models import DataQualityStats, ValidationIssue
 from monitoring.health import LatencyTracker, SystemHealthMonitor, SystemHealthReport
 from monitoring.logging import get_logger
 
@@ -81,9 +82,11 @@ class IngestionPipeline:
         # Wire candle builder to persistence and state store
         self.candle_builder.on_candle_closed(self._handle_candle_closed)
         self.candle_builder.on_candle_update(self._handle_candle_update)
+        self.candle_builder.on_candle_corrected(self._handle_candle_corrected)
 
-        # Wire connection disconnect safety hook
+        # Wire connection lifecycle hooks
         self.connection_manager.on_disconnect(self._handle_disconnect)
+        self.connection_manager.on_connect(self._handle_connect)
 
     def on_trade(self, callback: Callable[[NormalizedTrade], Awaitable[None] | None]) -> None:
         """Register listener for valid normalized trades."""
@@ -92,6 +95,12 @@ class IngestionPipeline:
     def on_candle_closed(self, callback: Callable[[Candle], Awaitable[None] | None]) -> None:
         """Register listener for completed candles."""
         self.candle_builder.on_candle_closed(callback)
+
+    def on_candle_corrected(
+        self, callback: Callable[[CandleCorrectionRecord], Awaitable[None] | None]
+    ) -> None:
+        """Register listener for auditable candle corrections."""
+        self.candle_builder.on_candle_corrected(callback)
 
     async def start(self) -> None:
         """Start the ingestion pipeline."""
@@ -148,6 +157,8 @@ class IngestionPipeline:
                 symbol=event.symbol,
                 issues=[i.message for i in val_result.issues],
             )
+            for issue in val_result.issues:
+                self.persistence_worker.enqueue_incident(issue)
             return
 
         # 2. Async persistence enqueue (non-blocking)
@@ -164,7 +175,12 @@ class IngestionPipeline:
                         symbol=trade.symbol,
                         issues=[i.message for i in trade_val.issues],
                     )
+                    for issue in trade_val.issues:
+                        self.persistence_worker.enqueue_incident(issue)
                     return
+
+                # Clean persistence enqueue
+                self.persistence_worker.enqueue_trade(trade)
 
                 # Update in-memory state
                 await self.state_store.set_latest_trade(trade)
@@ -184,7 +200,10 @@ class IngestionPipeline:
             elif event.event_type == "kline" or "k" in event.payload:
                 candle = self.normalizer.normalize_kline(event)
                 candle_val = self.quality_engine.validate_candle(candle)
-                if candle_val.is_valid and candle.is_closed:
+                if not candle_val.is_valid:
+                    for issue in candle_val.issues:
+                        self.persistence_worker.enqueue_incident(issue)
+                elif candle.is_closed:
                     self.persistence_worker.enqueue_candle(candle)
                     await self.state_store.set_latest_candle(candle)
 
@@ -213,11 +232,59 @@ class IngestionPipeline:
         """Callback on in-flight candle price/volume update."""
         await self.state_store.set_latest_candle(candle)
 
+    async def _handle_candle_corrected(self, correction: CandleCorrectionRecord) -> None:
+        """Callback when CandleBuilder corrects a finalized candle due to an auditable late trade."""
+        self.persistence_worker.enqueue_correction(correction)
+        logger.warning(
+            "candle_corrected_audit_recorded",
+            symbol=correction.symbol,
+            timeframe=correction.timeframe,
+            candle_start=correction.candle_start_time.isoformat(),
+            correction_id=correction.correction_id,
+            reason=correction.reason,
+            original_ohlcv=[
+                correction.original_open,
+                correction.original_high,
+                correction.original_low,
+                correction.original_close,
+                correction.original_volume,
+            ],
+            revised_ohlcv=[
+                correction.revised_open,
+                correction.revised_high,
+                correction.revised_low,
+                correction.revised_close,
+                correction.revised_volume,
+            ],
+        )
+
     async def _handle_disconnect(self, reason: str) -> None:
         """Safety handler: trip circuit breaker or pause decision making on disconnect."""
         logger.warning("disconnect_safety_triggered", reason=reason)
-        # Decision-making halted automatically via health report status
         self.quality_engine.trip_breaker(f"Market disconnected: {reason}")
+
+    async def _handle_connect(self) -> None:
+        """Handler when market connection is established or restored."""
+        logger.info("market_connection_established_or_restored")
+        for symbol in self.symbols:
+            self.quality_engine.record_reconnection(symbol)
+
+        # Reset breaker if it was tripped solely due to market disconnect
+        if (
+            self.quality_engine.is_breaker_tripped
+            and self.quality_engine.breaker_reason
+            and "Market disconnected" in self.quality_engine.breaker_reason
+        ):
+            self.quality_engine.reset_breaker()
+            logger.info("data_quality_breaker_reset_after_reconnection")
+
+    def get_data_quality_stats(self, symbol: str | None = None) -> DataQualityStats:
+        """Retrieve aggregated data quality metrics."""
+        return self.quality_engine.get_stats(symbol)
+
+    def get_recent_incidents(self) -> list[ValidationIssue]:
+        """Retrieve recent data quality incidents."""
+        return self.quality_engine.get_recent_incidents()
 
     def get_health(self) -> SystemHealthReport:
         """Generate structured health report."""

@@ -60,6 +60,21 @@ data/storage/cleaned/*
 !data/storage/cleaned/.gitkeep
 data/storage/parquet/*
 !data/storage/parquet/.gitkeep
+data/features/*
+!data/features/.gitkeep
+data/datasets/*
+!data/datasets/.gitkeep
+data/paper_trading/checkpoints/*
+!data/paper_trading/checkpoints/.gitkeep
+data/paper_trading/reports/*
+!data/paper_trading/reports/.gitkeep
+data/backups/*
+data/incidents/*
+data/audit/*
+data/deployment/*
+*.parquet
+*.sqlite
+*.db
 logs/
 *.log
 

@@ -69,7 +69,11 @@ select = [
 ]
 ignore = [
     "E501", # line too long (handled by formatter)
+    "N803", # argument name should be lowercase (standard ML convention uses X)
 ]
+
+[tool.ruff.lint.per-file-ignores]
+"tests/**" = ["N806", "E741", "F841"]
 
 [tool.ruff.format]
 quote-style = "double"
