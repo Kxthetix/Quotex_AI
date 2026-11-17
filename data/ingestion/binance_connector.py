@@ -4,6 +4,7 @@ Implements MarketDataInterface using Binance public WebSockets and REST API.
 Does not require any API keys or paid subscriptions.
 """
 
+import asyncio
 import json
 from collections.abc import AsyncIterator
 from datetime import UTC, datetime
@@ -170,54 +171,174 @@ class BinanceWebSocketConnector(MarketDataInterface):
         timeframe: str = "1m",
         start: datetime | None = None,
         end: datetime | None = None,
-        limit: int = 500,
+        limit: int | None = 500,
     ) -> list[Candle]:
-        """Fetch historical klines via Binance public REST API."""
+        """Fetch historical klines via Binance public REST API with automatic pagination."""
         url = f"{self._rest_url}/api/v3/klines"
-        params: dict[str, Any] = {
-            "symbol": symbol.upper(),
-            "interval": timeframe,
-            "limit": min(limit, 1000),
-        }
-        if start:
-            params["startTime"] = int(start.timestamp() * 1000)
-        if end:
-            params["endTime"] = int(end.timestamp() * 1000)
+        clean_symbol = symbol.upper()
 
-        async with (
-            aiohttp.ClientSession() as session,
-            session.get(url, params=params, timeout=aiohttp.ClientTimeout(total=10)) as resp,
-        ):
-            if resp.status != 200:
-                text = await resp.text()
-                raise RuntimeError(
-                    f"Failed to fetch Binance historical klines: {resp.status} - {text}"
-                )
-            data = await resp.json()
-
-        candles: list[Candle] = []
-        for k in data:
+        def _parse_kline(k: list[Any]) -> Candle:
             # Binance kline format:
             # 0: Open time, 1: Open, 2: High, 3: Low, 4: Close, 5: Volume, 6: Close time, ...
             start_time = datetime.fromtimestamp(float(k[0]) / 1000.0, tz=UTC)
             end_time = datetime.fromtimestamp(float(k[6]) / 1000.0, tz=UTC)
-            candles.append(
-                Candle(
-                    symbol=symbol.upper(),
-                    timeframe=timeframe,
-                    open=float(k[1]),
-                    high=float(k[2]),
-                    low=float(k[3]),
-                    close=float(k[4]),
-                    volume=float(k[5]),
-                    start_time=start_time,
-                    end_time=end_time,
-                    trades_count=int(k[8]),
-                    is_closed=True,
-                )
+            return Candle(
+                symbol=clean_symbol,
+                timeframe=timeframe,
+                open=float(k[1]),
+                high=float(k[2]),
+                low=float(k[3]),
+                close=float(k[4]),
+                volume=float(k[5]),
+                start_time=start_time,
+                end_time=end_time,
+                trades_count=int(k[8]),
+                is_closed=True,
             )
-        logger.info("historical_candles_fetched", symbol=symbol, count=len(candles))
-        return candles
+
+        all_candles: list[Candle] = []
+
+        async with aiohttp.ClientSession() as session:
+            # Mode A: Forward pagination from start timestamp
+            if start is not None:
+                curr_start = int(start.timestamp() * 1000)
+                end_ms = int(end.timestamp() * 1000) if end else None
+
+                while True:
+                    if limit is not None:
+                        remaining = limit - len(all_candles)
+                        if remaining <= 0:
+                            break
+                        batch_limit = min(remaining, 1000)
+                    else:
+                        batch_limit = 1000
+
+                    params: dict[str, Any] = {
+                        "symbol": clean_symbol,
+                        "interval": timeframe,
+                        "limit": batch_limit,
+                        "startTime": curr_start,
+                    }
+                    if end_ms is not None:
+                        params["endTime"] = end_ms
+
+                    retry_count = 0
+                    while True:
+                        async with session.get(
+                            url, params=params, timeout=aiohttp.ClientTimeout(total=15)
+                        ) as resp:
+                            if resp.status == 429:
+                                retry_after = int(resp.headers.get("Retry-After", 2))
+                                logger.warning("binance_rate_limited", retry_after=retry_after)
+                                await asyncio.sleep(retry_after)
+                                retry_count += 1
+                                if retry_count > 5:
+                                    raise RuntimeError("Binance rate limit retry count exceeded.")
+                                continue
+                            if resp.status != 200:
+                                text = await resp.text()
+                                raise RuntimeError(
+                                    f"Failed to fetch Binance historical klines: {resp.status} - {text}"
+                                )
+                            data = await resp.json()
+                            break
+
+                    if not data:
+                        break
+
+                    chunk_candles = [_parse_kline(k) for k in data]
+                    all_candles.extend(chunk_candles)
+
+                    if len(data) < batch_limit:
+                        break
+
+                    last_close_ms = int(data[-1][6])
+                    curr_start = last_close_ms + 1
+
+                    if end_ms is not None and curr_start >= end_ms:
+                        break
+
+                    # Small delay to respect rate limit weight
+                    await asyncio.sleep(0.05)
+
+            # Mode B: Backward pagination from end or most recent when no start provided
+            else:
+                target_limit = limit if limit is not None else 500
+                curr_end = int(end.timestamp() * 1000) if end else None
+
+                if target_limit <= 1000:
+                    params = {
+                        "symbol": clean_symbol,
+                        "interval": timeframe,
+                        "limit": target_limit,
+                    }
+                    if curr_end is not None:
+                        params["endTime"] = curr_end
+
+                    async with session.get(
+                        url, params=params, timeout=aiohttp.ClientTimeout(total=15)
+                    ) as resp:
+                        if resp.status != 200:
+                            text = await resp.text()
+                            raise RuntimeError(
+                                f"Failed to fetch Binance historical klines: {resp.status} - {text}"
+                            )
+                        data = await resp.json()
+
+                    all_candles = [_parse_kline(k) for k in data]
+                else:
+                    # Paginate backward in 1000-candle chunks
+                    raw_chunks: list[list[Any]] = []
+                    while len(all_candles) < target_limit:
+                        remaining = target_limit - len(all_candles)
+                        batch_limit = min(remaining, 1000)
+                        params = {
+                            "symbol": clean_symbol,
+                            "interval": timeframe,
+                            "limit": batch_limit,
+                        }
+                        if curr_end is not None:
+                            params["endTime"] = curr_end
+
+                        async with session.get(
+                            url, params=params, timeout=aiohttp.ClientTimeout(total=15)
+                        ) as resp:
+                            if resp.status == 429:
+                                retry_after = int(resp.headers.get("Retry-After", 2))
+                                await asyncio.sleep(retry_after)
+                                continue
+                            if resp.status != 200:
+                                text = await resp.text()
+                                raise RuntimeError(
+                                    f"Failed to fetch Binance historical klines: {resp.status} - {text}"
+                                )
+                            data = await resp.json()
+
+                        if not data:
+                            break
+
+                        raw_chunks.append(data)
+                        curr_candles = [_parse_kline(k) for k in data]
+                        all_candles.extend(curr_candles)
+
+                        if len(data) < batch_limit:
+                            break
+
+                        first_open_ms = int(data[0][0])
+                        curr_end = first_open_ms - 1
+                        await asyncio.sleep(0.05)
+
+                    # Deduplicate and sort chronologically
+                    seen = set()
+                    unique_candles = []
+                    for c in sorted(all_candles, key=lambda x: x.start_time):
+                        if c.start_time not in seen:
+                            seen.add(c.start_time)
+                            unique_candles.append(c)
+                    all_candles = unique_candles
+
+        logger.info("historical_candles_fetched", symbol=symbol, count=len(all_candles))
+        return all_candles
 
     def get_health(self) -> dict[str, Any]:
         """Return connector operational metrics."""

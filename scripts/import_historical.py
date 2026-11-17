@@ -15,7 +15,7 @@ logger = get_logger(__name__)
 async def import_historical_data(
     symbol: str,
     timeframe: str = "1m",
-    limit: int = 500,
+    limit: int | None = None,
     start_str: str | None = None,
     end_str: str | None = None,
     force: bool = False,
@@ -78,8 +78,13 @@ def main() -> None:
     parser.add_argument(
         "--symbol", type=str, default="BTCUSDT", help="Trading symbol (e.g. BTCUSDT)"
     )
-    parser.add_argument("--timeframe", type=str, default="1m", help="Candle timeframe (e.g. 1m)")
-    parser.add_argument("--limit", type=int, default=500, help="Number of candles to fetch")
+    parser.add_argument("--timeframe", type=str, default="1m", help="Candle timeframe (e.g. 1m, 1h, 1d)")
+    parser.add_argument(
+        "--limit",
+        type=int,
+        default=None,
+        help="Number of candles to fetch (defaults to 500 if no start date, or unlimited if start date given)",
+    )
     parser.add_argument(
         "--start", type=str, default=None, help="Start ISO timestamp (YYYY-MM-DDTHH:MM:SS)"
     )

@@ -1,0 +1,31 @@
+{
+  "model_bundle": "gbpnzd_real_h1_h30.joblib",
+  "symbol": "GBP/NZD",
+  "timeframe": "1h",
+  "horizon_bars": 30,
+  "source_data": "gbpnzd_h1_2020-2026.parquet",
+  "trained_through": "2026-11-12T17:59:59.999000+00:00",
+  "forecast_origin": "2026-11-15T23:59:59.999000+00:00",
+  "rows": 42770,
+  "labeled_rows": 42740,
+  "feature_count": 77,
+  "volatility_target": "annualized using actual candle timeframe",
+  "holdout_metrics": {
+    "test_rows": 6411,
+    "direction_accuracy": 0.467321790672282,
+    "direction_brier": 0.34874143459429435,
+    "direction_majority_baseline": 0.5083146518553218,
+    "return_mae": 0.0036235956578590965,
+    "return_mean_baseline_mae": 0.002953953797403515,
+    "volatility_mae": 0.016956603993250118,
+    "quality_accuracy": 0.7861488067384184,
+    "quality_brier": 0.16791547618940547,
+    "quality_majority_baseline": 0.6666443604242648,
+    "future_regime_accuracy": 0.8905007019185774,
+    "future_regime_majority_baseline": 0.8905007019185774,
+    "validation_rows": 6382,
+    "train_rows": 29887
+  },
+  "model_status": "research_candidate",
+  "feed_type": "real_fx_proxy_not_broker_otc"
+}

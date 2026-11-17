@@ -52,14 +52,55 @@ def main() -> None:
         help="Algorithm variant (e.g. logistic_regression, random_forest, lightgbm, ridge)",
     )
     parser.add_argument(
-        "--candles", type=int, default=600, help="Number of candles for training dataset"
+        "--candles", type=int, default=None, help="Number of candles for training dataset"
+    )
+    parser.add_argument(
+        "--data-file",
+        type=str,
+        default=None,
+        help="Path to real Parquet dataset (e.g. data/datasets/market_regimes/...)",
+    )
+    parser.add_argument(
+        "--horizon",
+        type=int,
+        default=15,
+        help="Prediction horizon in bars (e.g. 5, 15, 60, 240 bars)",
+    )
+    parser.add_argument(
+        "--fee-hurdle-bps",
+        type=float,
+        default=0.0,
+        help="Fee hurdle in basis points (e.g. 15.0 bps for friction-cleared direction)",
     )
     args = parser.parse_args()
 
-    print(f"Generating dataset with {args.candles} candles...")
-    candles = generate_synthetic_candles(count=args.candles, symbol="BTC/USDT")
-    generator = DatasetGenerator()
-    df, metadata = generator.create_dataset(candles, symbol="BTC/USDT", timeframe="1m")
+    if args.data_file:
+        from data.storage.parquet_store import load_candles_from_parquet
+
+        data_path = Path(args.data_file)
+        if not data_path.exists():
+            raise FileNotFoundError(f"Parquet file not found: {data_path}")
+        candles = load_candles_from_parquet(data_path)
+        if args.candles and len(candles) > args.candles:
+            candles = candles[: args.candles]
+        print(f"Loaded {len(candles)} real candles from {data_path.resolve()}.")
+        symbol = candles[0].symbol if candles else "BTC/USDT"
+        timeframe = candles[0].timeframe if candles else "1h"
+    else:
+        candle_count = args.candles if args.candles is not None else 600
+        print(f"Generating synthetic dataset with {candle_count} candles...")
+        candles = generate_synthetic_candles(count=candle_count, symbol="BTC/USDT")
+        symbol = "BTC/USDT"
+        timeframe = "1m"
+
+    from learning.labels.engine import LabelEngine
+
+    label_engine = LabelEngine(
+        horizons=[args.horizon],
+        fee_hurdle_bps=args.fee_hurdle_bps,
+    )
+    generator = DatasetGenerator(label_engine=label_engine)
+    df, metadata = generator.create_dataset(candles, symbol=symbol, timeframe=timeframe)
 
     # Chronological Split: 70% Train, 15% Val, 15% Test
     splitter = ChronologicalSplitter(train_ratio=0.70, val_ratio=0.15, test_ratio=0.15)
@@ -83,14 +124,34 @@ def main() -> None:
     registry = LocalModelRegistry()
     tracker = ExperimentTracker()
 
+    h = args.horizon
+    dir_col = (
+        f"direction_hurdle_{h}"
+        if args.fee_hurdle_bps > 0 and f"direction_hurdle_{h}" in splits.train_df.columns
+        else f"direction_{h}"
+    )
+    ret_col = (
+        f"target_return_{h}"
+        if f"target_return_{h}" in splits.train_df.columns
+        else f"return_{h}"
+    )
+    vol_col = (
+        f"target_volatility_{h}"
+        if f"target_volatility_{h}" in splits.train_df.columns
+        else f"volatility_{h}"
+    )
+    tq_col = f"trade_quality_{h}"
+
+    print(f"\n--- Training Target: Horizon {h} bars (Direction: {dir_col}, Return: {ret_col}) ---")
+
     if args.model == "direction":
-        y_train = splits.train_df["direction_15"].values.astype(int)
-        y_val = splits.val_df["direction_15"].values.astype(int)
-        y_test = splits.test_df["direction_15"].values.astype(int)
+        y_train = splits.train_df[dir_col].values.astype(int)
+        y_val = splits.val_df[dir_col].values.astype(int)
+        y_test = splits.test_df[dir_col].values.astype(int)
 
         model = DirectionModel(
             algorithm=algo,
-            model_name=f"direction_{algo}",
+            model_name=f"direction_{algo}_h{h}",
             expected_features=metadata.feature_columns,
         )
         model.fit(x_train, y_train)
@@ -115,8 +176,8 @@ def main() -> None:
             print(f"  {k:15s}: {v}")
 
     elif args.model == "majority_class":
-        y_train = splits.train_df["direction_15"].values.astype(int)
-        y_test = splits.test_df["direction_15"].values.astype(int)
+        y_train = splits.train_df[dir_col].values.astype(int)
+        y_test = splits.test_df[dir_col].values.astype(int)
 
         model = MajorityClassModel(expected_features=metadata.feature_columns)
         model.fit(x_train, y_train)
@@ -131,12 +192,12 @@ def main() -> None:
             print(f"  {k:15s}: {v}")
 
     elif args.model == "return":
-        y_train = splits.train_df["target_return_15"].values
-        y_test = splits.test_df["target_return_15"].values
+        y_train = splits.train_df[ret_col].values
+        y_test = splits.test_df[ret_col].values
 
         model = ReturnModel(
             algorithm=algo,
-            model_name=f"return_{algo}",
+            model_name=f"return_{algo}_h{h}",
             expected_features=metadata.feature_columns,
         )
         model.fit(x_train, y_train)
@@ -150,8 +211,8 @@ def main() -> None:
             print(f"  {k:15s}: {v}")
 
     elif args.model == "historical_mean":
-        y_train = splits.train_df["target_return_15"].values
-        y_test = splits.test_df["target_return_15"].values
+        y_train = splits.train_df[ret_col].values
+        y_test = splits.test_df[ret_col].values
 
         model = HistoricalMeanModel(expected_features=metadata.feature_columns)
         model.fit(x_train, y_train)
@@ -165,12 +226,12 @@ def main() -> None:
             print(f"  {k:15s}: {v}")
 
     elif args.model == "volatility":
-        y_train = splits.train_df["volatility_15"].values
-        y_test = splits.test_df["volatility_15"].values
+        y_train = splits.train_df[vol_col].values
+        y_test = splits.test_df[vol_col].values
 
         model = VolatilityModel(
             algorithm=algo,
-            model_name=f"volatility_{algo}",
+            model_name=f"volatility_{algo}_h{h}",
             expected_features=metadata.feature_columns,
         )
         model.fit(x_train, y_train)
@@ -184,12 +245,12 @@ def main() -> None:
             print(f"  {k:15s}: {v}")
 
     elif args.model == "trade_quality":
-        y_train = splits.train_df["trade_quality_15"].values.astype(int)
-        y_test = splits.test_df["trade_quality_15"].values.astype(int)
+        y_train = splits.train_df[tq_col].values.astype(int)
+        y_test = splits.test_df[tq_col].values.astype(int)
 
         model = TradeQualityModel(
             algorithm=algo,
-            model_name=f"trade_quality_{algo}",
+            model_name=f"trade_quality_{algo}_h{h}",
             expected_features=metadata.feature_columns,
         )
         model.fit(x_train, y_train)

@@ -61,6 +61,7 @@ class MetricsEngine:
         self.risk_free_rate = risk_free_rate
         self.annualization_factor = annualization_factor
 
+
     def calculate_metrics(
         self,
         equity_curve: list[EquityPoint],
@@ -256,3 +257,17 @@ class MetricsEngine:
             benchmark_return=0.0,
             regime_performance={},
         )
+
+
+def annualization_factor_for_timeframe(timeframe: str) -> float:
+    """Return bars per 365.25-day year for timeframes such as ``5m`` or ``1h``."""
+    if len(timeframe) < 2 or not timeframe[:-1].isdigit():
+        raise ValueError(f"Unsupported timeframe: {timeframe!r}")
+
+    interval = int(timeframe[:-1])
+    unit_seconds = {"s": 1, "m": 60, "h": 3600, "d": 86400}.get(timeframe[-1].lower())
+    if interval <= 0 or unit_seconds is None:
+        raise ValueError(f"Unsupported timeframe: {timeframe!r}")
+
+    seconds_per_year = 365.25 * 24 * 60 * 60
+    return seconds_per_year / (interval * unit_seconds)

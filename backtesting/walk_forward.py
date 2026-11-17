@@ -15,7 +15,11 @@ from typing import Any
 
 from backtesting.engine import BacktestEngine
 from backtesting.events import SignalEvent
-from backtesting.metrics import MetricsEngine, PerformanceMetrics
+from backtesting.metrics import (
+    MetricsEngine,
+    PerformanceMetrics,
+    annualization_factor_for_timeframe,
+)
 from backtesting.models import BacktestConfig, BacktestResult, EquityPoint, TradeRecord
 from data.ingestion.models import Candle
 
@@ -73,7 +77,9 @@ class WalkForwardEngine:
 
     def __init__(self, config: WalkForwardConfig) -> None:
         self.config = config
-        self.metrics_engine = MetricsEngine()
+        self.metrics_engine = MetricsEngine(
+            annualization_factor=annualization_factor_for_timeframe(config.timeframe)
+        )
 
     def run(
         self,

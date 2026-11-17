@@ -1,6 +1,6 @@
-# Historical Backtest Report: `bt_581958b351`
+# Historical Backtest Report: `bt_3b916803ad`
 
-**Execution Timestamp:** 2026-09-28 20:07:37 UTC
+**Execution Timestamp:** 2026-10-06 20:38:45 UTC
 **Code Version:** `v1.0.0` | **Model Version:** `v1.0.0` | **Feature Version:** `v1.0.0`
 
 ---
@@ -10,24 +10,24 @@
 | Metric | Result | Benchmark (Buy & Hold) |
 | :--- | :--- | :--- |
 | **Initial Capital** | $10,000.00 | $10,000.00 |
-| **Final Equity** | $9,869.88 | - |
-| **Total Return** | **-1.30%** | **+0.69%** |
-| **CAGR** | -1.30% | - |
-| **Max Drawdown** | **1.32%** | - |
-| **Sharpe Ratio** | -111.39 | - |
-| **Sortino Ratio** | -67.04 | - |
-| **Calmar Ratio** | -0.98 | - |
-| **Win Rate** | 0.0% | - |
-| **Profit Factor** | 0.00 | - |
-| **Expectancy** | $-16.27 | - |
+| **Final Equity** | $10,440.57 | - |
+| **Total Return** | **+4.41%** | **-24.45%** |
+| **CAGR** | +69.03% | - |
+| **Max Drawdown** | **14.61%** | - |
+| **Sharpe Ratio** | 8.03 | - |
+| **Sortino Ratio** | 6.50 | - |
+| **Calmar Ratio** | 4.73 | - |
+| **Win Rate** | 31.8% | - |
+| **Profit Factor** | 1.23 | - |
+| **Expectancy** | $20.03 | - |
 
 ---
 
 ## 2. Test Configuration & Execution Assumptions
 
-- **Symbol:** `BTC/USDT`
-- **Timeframe:** `1m`
-- **Period:** 2026-01-01 00:01 to 2026-01-01 08:20 (8:19:00)
+- **Symbol:** `BTCUSDT`
+- **Timeframe:** `1h`
+- **Period:** 2020-03-01 00:59 to 2020-03-31 00:59 (30 days, 0:00:00)
 - **Fee Model:** Maker: `2.0 bps` | Taker: `5.0 bps` | Fixed: `$0.00`
 - **Spread Model:** Half-Spread `1.0 bps` (Bid/Ask derived around mark)
 - **Slippage Model:** Baseline `3.0 bps`
@@ -42,23 +42,23 @@
 
 | Cost Category | Total Amount ($) | Impact on P&L |
 | :--- | :--- | :--- |
-| **Gross Realized P&L** | $-50.67 | _Pre-friction return_ |
-| **Exchange Fees** | $79.46 | -156.8% |
-| **Spread Friction** | $15.89 | -31.4% |
-| **Execution Slippage** | $47.67 | -94.1% |
-| **Net Realized P&L** | **$-130.12** | **Net realizable performance** |
+| **Gross Realized P&L** | $+600.09 | _Pre-friction return_ |
+| **Exchange Fees** | $159.52 | -26.6% |
+| **Spread Friction** | $31.90 | -5.3% |
+| **Execution Slippage** | $95.71 | -15.9% |
+| **Net Realized P&L** | **$+440.57** | **Net realizable performance** |
 
 ---
 
 ## 4. Trade Statistics
 
-- **Total Completed Trades:** 8
-- **Winning Trades:** 0 (0.0%)
-- **Losing Trades:** 8
-- **Average Trade Net P&L:** $-16.27
-- **Average Winning Trade:** $0.00
-- **Average Losing Trade:** $16.27
-- **Average Holding Period:** 32.1 minutes
+- **Total Completed Trades:** 22
+- **Winning Trades:** 7 (31.8%)
+- **Losing Trades:** 15
+- **Average Trade Net P&L:** $20.03
+- **Average Winning Trade:** $335.81
+- **Average Losing Trade:** $127.34
+- **Average Holding Period:** 954.5 minutes
 
 ---
 
@@ -66,7 +66,7 @@
 
 | Regime | Trades | Net P&L ($) | Win Rate (%) | Avg Trade ($) |
 | :--- | :--- | :--- | :--- | :--- |
-| SIDEWAYS | 8 | $-130.12 | 0.0% | $-16.27 |
+| SIDEWAYS | 22 | $440.57 | 31.8% | $20.03 |
 
 ---
 

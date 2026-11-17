@@ -443,12 +443,13 @@ Phase 5 establishes an event-driven chronological simulation environment replica
 
 #### 1. Run Chronological Backtest with Realistic Microstructure Friction
 ```powershell
-python scripts/run_backtest.py --symbol BTC/USDT --candles 600 --initial-capital 10000 --spread-bps 2.0 --slippage-bps 3.0 --latency-sec 1.0
+python scripts/run_backtest.py --data-file data/storage/parquet/BTCUSDT/BTCUSDT_1m_20260928.parquet --initial-capital 10000 --spread-bps 2.0 --slippage-bps 3.0 --latency-sec 1.0
 ```
+Use `--synthetic-smoke-test --candles 600` only to inspect the runner; generated-candle results are not evidence of strategy performance.
 
 #### 2. Run Rolling Walk-Forward Cross-Validation
 ```powershell
-python scripts/run_walk_forward.py --symbol BTC/USDT --candles 800 --train-bars 400 --val-bars 100 --test-bars 100 --step-bars 100
+python scripts/run_walk_forward.py --data-file data/storage/parquet/BTCUSDT/BTCUSDT_1m_20260928.parquet --train-bars 400 --val-bars 100 --test-bars 100 --step-bars 100
 ```
 
 #### 3. Inspect Generated Reports and Ledgers

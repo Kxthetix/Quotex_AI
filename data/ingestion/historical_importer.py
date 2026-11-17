@@ -48,7 +48,7 @@ class HistoricalDataImporter:
         timeframe: str = "1m",
         start: datetime | None = None,
         end: datetime | None = None,
-        limit: int = 500,
+        limit: int | None = None,
         force_reimport: bool = False,
     ) -> IngestionRun:
         """Execute historical candlestick import with audit tracking and idempotency."""

@@ -21,7 +21,18 @@ def main() -> None:
     parser = argparse.ArgumentParser(description="Run realistic event-driven backtest simulation.")
     parser.add_argument("--symbol", type=str, default="BTC/USDT", help="Trading pair symbol")
     parser.add_argument("--timeframe", type=str, default="1m", help="Candle timeframe")
-    parser.add_argument("--candles", type=int, default=500, help="Number of historical candles")
+    parser.add_argument(
+        "--data-file",
+        type=str,
+        default=None,
+        help="Path to real historical Parquet dataset (e.g. data/datasets/market_regimes/...)",
+    )
+    parser.add_argument(
+        "--synthetic-smoke-test",
+        action="store_true",
+        help="Use generated candles for a smoke run; results are not performance evidence",
+    )
+    parser.add_argument("--candles", type=int, default=None, help="Number of historical candles")
     parser.add_argument(
         "--initial-capital", type=float, default=10000.0, help="Initial portfolio capital"
     )
@@ -46,22 +57,34 @@ def main() -> None:
     parser.add_argument(
         "--report-out",
         type=str,
-        default="reports/backtest_report.md",
+        default=None,
         help="Markdown report output path",
     )
     parser.add_argument(
         "--equity-out",
         type=str,
-        default="reports/equity_curve.csv",
+        default=None,
         help="Equity curve CSV output path",
     )
     parser.add_argument(
         "--trades-out",
         type=str,
-        default="reports/trade_ledger.csv",
+        default=None,
         help="Trade ledger CSV output path",
     )
     args = parser.parse_args()
+    if bool(args.data_file) == args.synthetic_smoke_test:
+        parser.error("Provide --data-file for historical evaluation or --synthetic-smoke-test explicitly")
+
+    if args.synthetic_smoke_test:
+        args.report_out = args.report_out or "reports/synthetic_backtest_report.md"
+        args.equity_out = args.equity_out or "reports/synthetic_equity_curve.csv"
+        args.trades_out = args.trades_out or "reports/synthetic_trade_ledger.csv"
+        print("WARNING: generated candles are for smoke testing, not performance evaluation.")
+    else:
+        args.report_out = args.report_out or "reports/backtest_report.md"
+        args.equity_out = args.equity_out or "reports/equity_curve.csv"
+        args.trades_out = args.trades_out or "reports/trade_ledger.csv"
 
     print("\n=======================================================")
     print("TRADING INTELLIGENCE SYSTEM — PHASE 5 BACKTEST")
@@ -75,8 +98,23 @@ def main() -> None:
     print(f"Sizing:          {args.sizing_method}")
 
     # Generate or load candles
-    candles = generate_synthetic_candles(count=args.candles, symbol=args.symbol)
-    print(f"Loaded {len(candles)} historical candles.")
+    if args.data_file:
+        from data.storage.parquet_store import load_candles_from_parquet
+
+        data_path = Path(args.data_file)
+        if not data_path.exists():
+            raise FileNotFoundError(f"Parquet file not found: {data_path}")
+        candles = load_candles_from_parquet(data_path)
+        if args.candles and len(candles) > args.candles:
+            candles = candles[: args.candles]
+        print(f"Loaded {len(candles)} real historical candles from {data_path.resolve()}.")
+        if candles:
+            args.symbol = candles[0].symbol
+            args.timeframe = candles[0].timeframe
+    else:
+        candle_count = args.candles if args.candles is not None else 500
+        candles = generate_synthetic_candles(count=candle_count, symbol=args.symbol)
+        print(f"Loaded {len(candles)} synthetic candles.")
 
     # Configure backtest
     sizing_enum = getattr(SizingMethod, args.sizing_method, SizingMethod.PERCENT_CAPITAL)

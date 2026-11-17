@@ -218,19 +218,26 @@ class FeatureEngine:
             lookback_map[name] = defn.lookback if defn else 1
 
         n_rows = len(df)
+        feat_matrix = feat_df.to_numpy()
+        timestamps = [t.to_pydatetime() if hasattr(t, "to_pydatetime") else t for t in time_series]
+        lookback_arr = [lookback_map[name] for name in feature_names]
+        now_utc = datetime.now(UTC)
+        base_tf = self.config.base_timeframe
+        feat_ver = self.config.version
+
         for i in range(n_rows):
-            ts = time_series.iloc[i].to_pydatetime()
+            ts = timestamps[i]
+            row_vals = feat_matrix[i]
             row_dict: dict[str, float | None] = {}
             val_dict: dict[str, FeatureValidity] = {}
             has_warming_up = False
             has_invalid = False
 
-            for name in feature_names:
-                val = feat_df.iloc[i][name]
-                if pd.isna(val) or np.isinf(val):
+            for j, name in enumerate(feature_names):
+                val = row_vals[j]
+                if np.isnan(val) or np.isinf(val):
                     row_dict[name] = None
-                    # If current bar index is less than required lookback, it's natural warm-up
-                    if i < lookback_map[name]:
+                    if i < lookback_arr[j]:
                         val_dict[name] = FeatureValidity.WARMING_UP
                         has_warming_up = True
                     else:
@@ -251,17 +258,18 @@ class FeatureEngine:
             elif has_warming_up:
                 self.metrics["warming_up_vectors_count"] += 1
 
-            vec = FeatureVector(
-                symbol=sym,
-                timestamp=ts,
-                timeframe=self.config.base_timeframe,
-                feature_version=self.config.version,
-                values=row_dict,
-                validity=val_dict,
-                is_valid=is_vec_valid,
-                calculated_at=datetime.now(UTC),
+            vectors.append(
+                FeatureVector(
+                    symbol=sym,
+                    timestamp=ts,
+                    timeframe=base_tf,
+                    feature_version=feat_ver,
+                    values=row_dict,
+                    validity=val_dict,
+                    is_valid=is_vec_valid,
+                    calculated_at=now_utc,
+                )
             )
-            vectors.append(vec)
 
         return vectors
 

@@ -57,7 +57,9 @@ class ExecutionSimulator:
         is_buy = order.side == OrderSide.BUY
 
         # 2. Check Order Type Feasibility against candle range
-        ref_price = candle.close
+        # Signals are formed from the previous completed candle. For market orders,
+        # use this bar's open as the earliest observable execution price.
+        ref_price = candle.open
         is_maker = False
 
         if order.order_type == OrderType.LIMIT:

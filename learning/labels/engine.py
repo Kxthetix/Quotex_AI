@@ -23,11 +23,13 @@ class LabelEngine:
         horizons: list[int] | None = None,
         trade_quality_target_pct: float = 0.005,  # 0.5% profit target
         trade_quality_stop_pct: float = 0.005,  # 0.5% stop loss
+        fee_hurdle_bps: float = 0.0,  # e.g. 15.0 bps friction hurdle
     ) -> None:
         self.label_version = label_version
         self.horizons = horizons or [5, 15, 60]
         self.trade_quality_target_pct = trade_quality_target_pct
         self.trade_quality_stop_pct = trade_quality_stop_pct
+        self.fee_hurdle_bps = fee_hurdle_bps
         self._definitions = self._build_definitions()
 
     def _build_definitions(self) -> list[LabelDefinition]:
@@ -78,6 +80,18 @@ class LabelEngine:
                     description=f"Binary flag: 1 if profit target hit before stop loss within {h} bars, else 0",
                 )
             )
+            # 5. Friction-Hurdle Direction (if fee hurdle configured)
+            if self.fee_hurdle_bps > 0:
+                defs.append(
+                    LabelDefinition(
+                        name=f"direction_hurdle_{h}",
+                        version=self.label_version,
+                        target_type="binary_classification",
+                        horizon_bars=h,
+                        parameters={"fee_hurdle_bps": self.fee_hurdle_bps},
+                        description=f"Friction-cleared binary flag: 1 if forward return > +{self.fee_hurdle_bps:.1f} bps, else 0",
+                    )
+                )
         return defs
 
     def compute_labels(self, df: pd.DataFrame) -> pd.DataFrame:
@@ -148,6 +162,13 @@ class LabelEngine:
             res[f"return_{h}"] = ret_col
             res[f"volatility_{h}"] = vol_col
             res[f"trade_quality_{h}"] = tq_col
+
+            if self.fee_hurdle_bps > 0:
+                hurdle = self.fee_hurdle_bps / 10000.0
+                dir_hurdle = np.full(n_rows, np.nan)
+                valid_mask = ~np.isnan(ret_col)
+                dir_hurdle[valid_mask] = (ret_col[valid_mask] > hurdle).astype(float)
+                res[f"direction_hurdle_{h}"] = dir_hurdle
 
         return res
 

@@ -17,7 +17,7 @@ from backtesting.execution.latency import FixedLatencyModel, ZeroLatencyModel
 from backtesting.execution.simulator import ExecutionSimulator
 from backtesting.execution.slippage import PercentageSlippageModel
 from backtesting.execution.spread import PercentageSpreadModel
-from backtesting.metrics import MetricsEngine
+from backtesting.metrics import MetricsEngine, annualization_factor_for_timeframe
 from backtesting.models import (
     BacktestConfig,
     BacktestResult,
@@ -80,7 +80,9 @@ class BacktestEngine:
         self.order_engine = OrderEngine()
         self.portfolio = PortfolioEngine(initial_capital=self.config.initial_capital)
         self.position_sizer = PositionSizer(self.config)
-        self.metrics_engine = MetricsEngine()
+        self.metrics_engine = MetricsEngine(
+            annualization_factor=annualization_factor_for_timeframe(self.config.timeframe)
+        )
 
         self.audit_log: list[str] = []
         self.warnings: list[str] = []
@@ -220,7 +222,7 @@ class BacktestEngine:
             )
 
             if fill:
-                self._apply_fill(fill, order, current_time)
+                self._apply_fill(fill, order, fill.timestamp)
 
     def _apply_fill(
         self,
@@ -285,18 +287,15 @@ class BacktestEngine:
                     timestamp=current_time,
                     metadata={"reason": ExitReason.STOP_LOSS},
                 )
-                fill = self.execution_simulator.process_order(
-                    order=exit_order,
-                    candle=candle,
-                    current_time=current_time,
-                )
-                if fill:
-                    self._apply_fill(
-                        fill, exit_order, current_time, exit_reason=ExitReason.STOP_LOSS
-                    )
+                # The stop was observed from this completed candle. Queue the exit
+                # for the next candle so the backtest cannot fill at an earlier price.
 
     def _handle_signal(self, signal: SignalEvent, candle: Candle, current_time: datetime) -> None:
         """Translate standardized SignalEvent into sized orders."""
+        if any(order.symbol == signal.symbol for order in self.order_engine.active_orders):
+            self._log_event(current_time, "Signal held while a prior order remains active")
+            return
+
         pe = self.portfolio.get_position_engine(signal.symbol)
         pos = pe.position
 
@@ -316,11 +315,8 @@ class BacktestEngine:
                     current_time,
                     f"Exit order created: {order.order_id} {side} qty={pos.quantity:.4f}",
                 )
-                # Immediate execution attempt if zero latency
-                if self.config.latency_seconds == 0:
-                    fill = self.execution_simulator.process_order(order, candle, current_time)
-                    if fill:
-                        self._apply_fill(fill, order, current_time, exit_reason=ExitReason.SIGNAL)
+                # Active orders are evaluated on the next candle, never on the
+                # candle that was used to form this signal.
             return
 
         # Case 2: Enter Long Signal
@@ -354,10 +350,8 @@ class BacktestEngine:
                 self._log_event(
                     current_time, f"Entry Long order created: {order.order_id} qty={order_qty:.4f}"
                 )
-                if self.config.latency_seconds == 0:
-                    fill = self.execution_simulator.process_order(order, candle, current_time)
-                    if fill:
-                        self._apply_fill(fill, order, current_time, exit_reason=ExitReason.SIGNAL)
+                # Active orders are evaluated on the next candle, never on the
+                # candle that was used to form this signal.
 
         # Case 3: Enter Short Signal
         elif signal.suggested_action == "ENTER_SHORT":
@@ -388,10 +382,8 @@ class BacktestEngine:
                 self._log_event(
                     current_time, f"Entry Short order created: {order.order_id} qty={order_qty:.4f}"
                 )
-                if self.config.latency_seconds == 0:
-                    fill = self.execution_simulator.process_order(order, candle, current_time)
-                    if fill:
-                        self._apply_fill(fill, order, current_time, exit_reason=ExitReason.SIGNAL)
+                # Active orders are evaluated on the next candle, never on the
+                # candle that was used to form this signal.
 
     def _force_close_open_positions(self, final_price: float, end_time: datetime) -> None:
         """Force close any remaining open positions at the final available price."""

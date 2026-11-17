@@ -20,7 +20,18 @@ from scripts.calculate_features import generate_synthetic_candles
 def main() -> None:
     parser = argparse.ArgumentParser(description="Run rolling walk-forward cross-validation.")
     parser.add_argument("--symbol", type=str, default="BTC/USDT", help="Trading pair symbol")
-    parser.add_argument("--candles", type=int, default=800, help="Total historical candles")
+    parser.add_argument(
+        "--data-file",
+        type=str,
+        default=None,
+        help="Path to real historical Parquet dataset (e.g. data/datasets/market_regimes/...)",
+    )
+    parser.add_argument("--candles", type=int, default=None, help="Total historical candles")
+    parser.add_argument(
+        "--synthetic-smoke-test",
+        action="store_true",
+        help="Use generated candles for a smoke run; results are not performance evidence",
+    )
     parser.add_argument("--train-bars", type=int, default=400, help="Training partition bars")
     parser.add_argument("--val-bars", type=int, default=100, help="Validation partition bars")
     parser.add_argument(
@@ -30,10 +41,17 @@ def main() -> None:
     parser.add_argument(
         "--report-out",
         type=str,
-        default="reports/walk_forward_report.md",
+        default=None,
         help="Markdown report output path",
     )
     args = parser.parse_args()
+    if bool(args.data_file) == args.synthetic_smoke_test:
+        parser.error("Provide --data-file for historical evaluation or --synthetic-smoke-test explicitly")
+    if args.synthetic_smoke_test:
+        args.report_out = args.report_out or "reports/synthetic_walk_forward_report.md"
+        print("WARNING: generated candles are for smoke testing, not performance evaluation.")
+    else:
+        args.report_out = args.report_out or "reports/walk_forward_report.md"
 
     print("\n=======================================================")
     print("TRADING INTELLIGENCE SYSTEM — WALK-FORWARD VALIDATION")
@@ -42,10 +60,24 @@ def main() -> None:
     print(
         f"Partitions:  Train={args.train_bars}, Val={args.val_bars}, Test={args.test_bars}, Step={args.step_bars}"
     )
-    print(f"Total Bars:  {args.candles}")
 
-    candles = generate_synthetic_candles(count=args.candles, symbol=args.symbol)
-    print(f"Loaded {len(candles)} historical candles.\n")
+    if args.data_file:
+        from data.storage.parquet_store import load_candles_from_parquet
+
+        data_path = Path(args.data_file)
+        if not data_path.exists():
+            raise FileNotFoundError(f"Parquet file not found: {data_path}")
+        candles = load_candles_from_parquet(data_path)
+        if args.candles and len(candles) > args.candles:
+            candles = candles[: args.candles]
+        print(f"Loaded {len(candles)} real candles from {data_path.resolve()}.\n")
+        args.symbol = candles[0].symbol if candles else args.symbol
+        timeframe = candles[0].timeframe if candles else "1m"
+    else:
+        candle_count = args.candles if args.candles is not None else 800
+        candles = generate_synthetic_candles(count=candle_count, symbol=args.symbol)
+        print(f"Loaded {len(candles)} synthetic candles.\n")
+        timeframe = candles[0].timeframe if candles else "1m"
 
     wf_config = WalkForwardConfig(
         train_bars=args.train_bars,
@@ -53,6 +85,7 @@ def main() -> None:
         test_bars=args.test_bars,
         step_bars=args.step_bars,
         symbol=args.symbol,
+        timeframe=timeframe,
         backtest_config=BacktestConfig(
             symbol=args.symbol,
             initial_capital=10000.0,

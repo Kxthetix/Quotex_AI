@@ -19,7 +19,12 @@ from features.registry import FeatureRegistry
 
 
 def generate_synthetic_candles(count: int, symbol: str) -> list[Candle]:
-    """Generate realistic OHLCV candles for demonstration."""
+    """Generate synthetic OHLCV candles strictly for smoke-testing and pipeline verification.
+
+    CAUTION: Synthetic data must NEVER be used for strategy validation, historical
+    performance claims, or profitability demonstrations. It serves strictly as a
+    software verification fixture.
+    """
     np.random.seed(42)
     start = datetime(2026, 1, 1, 0, 0, 0, tzinfo=UTC)
     delta = timedelta(minutes=1)
